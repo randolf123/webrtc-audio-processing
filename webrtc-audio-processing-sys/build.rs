@@ -197,13 +197,24 @@ mod webrtc {
             webrtc_build_dir.display()
         );
 
-        // Copy the sources to under out directory so that we can patch it without consequences.
-        let mut cp = Command::new("cp");
-        // Copy recursively, preserve attributes. Use trailing dot trick to prevent creating
-        // `webrtc-audio-processing/webrtc-audio-processing` nesting on a 2nd invocation.
-        cp.arg("-a").arg(bundled_source_path.join(".")).arg(&webrtc_source_dir);
-        let status = cp.status().context("executing cp")?;
-        assert!(status.success(), "Command failed: {:?}", cp);
+        // Copy the sources to under out directory so that we can patch them without consequences.
+        let mut copy_options = fs_extra::dir::CopyOptions::new();
+        copy_options.copy_inside = true;
+        copy_options.overwrite = true;
+        fs_extra::dir::copy(bundled_source_path, &webrtc_source_dir, &copy_options)
+            .context("copying bundled webrtc-audio-processing sources")?;
+
+        let meson_path = webrtc_source_dir.join("meson.build");
+        let meson_source = std::fs::read_to_string(&meson_path)
+            .context("reading bundled webrtc-audio-processing meson.build")?;
+        let cpp17_requirements = meson_source.matches("cpp_std=c++17").count();
+        anyhow::ensure!(
+            cpp17_requirements == 2,
+            "expected exactly two C++17 requirements in bundled meson.build, found {}",
+            cpp17_requirements
+        );
+        std::fs::write(&meson_path, meson_source.replace("cpp_std=c++17", "cpp_std=c++20"))
+            .context("updating bundled webrtc-audio-processing to C++20")?;
 
         #[cfg(feature = "experimental-unlink-ns")]
         apply_patch("unlink-multichannel-noise-suppression-filters.patch")?;
@@ -396,13 +407,14 @@ fn main() -> Result<()> {
     // linkers (like when passing -Wl,--as-needed) may discard the c++ library (automatically
     // added by cc) from the linking list, resulting in build failure.
     // The linking order should respect the dependency graph, i.e. wrapper -> webrtc-2.
-    cc_build
-        .cpp(true)
-        .file("src/wrapper.cpp")
-        .includes(&include_dirs)
-        .flag("-std=c++17")
-        .flag("-Wno-unused-parameter")
-        .out_dir(out_dir());
+    cc_build.cpp(true).file("src/wrapper.cpp").includes(&include_dirs).out_dir(out_dir());
+
+    let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
+    if target_env == "msvc" {
+        cc_build.flag("/std:c++20");
+    } else {
+        cc_build.flag("-std=c++20");
+    }
 
     // Inform wrapper code that headers for internal classes (ResidualEchoDetector) are available.
     #[cfg(feature = "bundled")]
@@ -429,10 +441,14 @@ fn main() -> Result<()> {
         println!("cargo:rustc-link-lib=dylib={LIB_NAME}");
     }
 
+    if cfg!(target_os = "windows") {
+        println!("cargo:rustc-link-lib=winmm");
+    }
+
     let binding_file = out_dir().join("bindings.rs");
     let mut builder = bindgen::Builder::default()
         .header("src/wrapper.hpp")
-        .clang_args(&["-x", "c++", "-std=c++17", "-fparse-all-comments"])
+        .clang_args(&["-x", "c++", "-std=c++20", "-fparse-all-comments"])
         .generate_comments(true)
         .enable_cxx_namespaces()
         // Rust edition 2024 warns on usafe operations outside unsafe block, even in unsafe fns.
