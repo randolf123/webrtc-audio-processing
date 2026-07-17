@@ -303,7 +303,7 @@ mod webrtc {
 
     /// Extract defined (non-external) symbols from a static library using nm.
     fn get_defined_symbols(archive_path: &std::path::Path) -> Result<Vec<String>> {
-        let output = Command::new("nm")
+        let output = Command::new(determine_llvm_tool("llvm-nm"))
             .arg("--defined-only")
             .arg("--format=posix")
             .arg(archive_path)
@@ -478,6 +478,17 @@ fn main() -> Result<()> {
 
 /// Reliably determine a path to objcopy binary bundled with the active Rust toolchain (rust-objcopy)
 fn determine_objcopy_path() -> Result<PathBuf> {
+    if let Ok(llvm_bin_path) = env::var("LLVM_BIN_PATH") {
+        let llvm_objcopy = PathBuf::from(llvm_bin_path).join(if cfg!(windows) {
+            "llvm-objcopy.exe"
+        } else {
+            "llvm-objcopy"
+        });
+        if llvm_objcopy.exists() {
+            return Ok(llvm_objcopy);
+        }
+    }
+
     // 1. Get the rustc command (this might be a path or just "rustc")
     let rustc = env::var("RUSTC").unwrap_or_else(|_| "rustc".to_string());
 
@@ -510,4 +521,18 @@ fn determine_objcopy_path() -> Result<PathBuf> {
     }
 
     Ok(objcopy)
+}
+
+fn determine_llvm_tool(name: &str) -> PathBuf {
+    if let Ok(llvm_bin_path) = env::var("LLVM_BIN_PATH") {
+        let tool = PathBuf::from(llvm_bin_path).join(if cfg!(windows) {
+            format!("{name}.exe")
+        } else {
+            name.to_owned()
+        });
+        if tool.exists() {
+            return tool;
+        }
+    }
+    PathBuf::from(name)
 }
