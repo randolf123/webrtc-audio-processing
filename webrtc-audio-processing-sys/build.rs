@@ -429,9 +429,13 @@ fn main() -> Result<()> {
     println!("cargo:rerun-if-changed=src/wrapper.cpp");
 
     // Prefix the wrapper library's references to webrtc symbols to match the renamed webrtc library.
-    let wrapper_lib = out_dir().join("libwebrtc_audio_processing_wrapper.a");
-    if wrapper_lib.exists() {
-        prefix_archive_symbols(&wrapper_lib, &renamed_symbols, SYMBOL_PREFIX)?;
+    for wrapper_lib in [
+        out_dir().join("libwebrtc_audio_processing_wrapper.a"),
+        out_dir().join("webrtc_audio_processing_wrapper.lib"),
+    ] {
+        if wrapper_lib.exists() {
+            prefix_archive_symbols(&wrapper_lib, &renamed_symbols, SYMBOL_PREFIX)?;
+        }
     }
 
     if cfg!(feature = "bundled") {
