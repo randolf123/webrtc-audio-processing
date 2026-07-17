@@ -284,7 +284,10 @@ mod webrtc {
         for lib_dir in lib_dirs {
             let lib_path = lib_dir.join(&static_lib_filename);
             if lib_path.exists() {
-                let symbols = get_defined_symbols(&lib_path)?;
+                let symbols = get_defined_symbols(&lib_path)?
+                    .into_iter()
+                    .filter(|symbol| symbol.starts_with("WebRtcSpl_"))
+                    .collect::<Vec<_>>();
                 prefix_archive_symbols(&lib_path, &symbols, prefix)?;
                 return Ok(symbols);
             }
